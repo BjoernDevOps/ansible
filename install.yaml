@@ -206,11 +206,11 @@
       chdir: $HOME
       creates: pod_network_setup.txt
 
-  - name: set cluster secret
-    become: yes
-    become_user: root
-    shell: |
-      kubectl create secret generic regcred --from-file=.dockerconfigjson=/root/.docker/config.json --type=kubernetes.io/dockerconfigjson
+#  - name: set cluster secret
+#    become: yes
+#    become_user: root
+#    shell: |
+#      kubectl create secret generic regcred --from-file=.dockerconfigjson=/root/.docker/config.json --type=kubernetes.io/dockerconfigjson
 
   - name: get join command
     shell: kubeadm token create --print-join-command
