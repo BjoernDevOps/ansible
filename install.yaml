@@ -1,0 +1,235 @@
+--- 
+- hosts: all
+  tasks:
+  - name: Stop and disable firewalld.
+    service:
+      name: firewalld
+      state: stopped
+      enabled: False
+
+  - name: install packages - net-tools
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - net-tools
+
+  - name: install packages - epel-release
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - epel-release 
+
+  - name: install packages - open-vm-tools
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - open-vm-tools
+
+  - name: install packages - nfs-utils
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - nfs-utils
+
+  - name: install packages - sshpass
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - sshpass
+
+  - name: install packages - bind-utils 
+    become: true
+    become_user: root
+    yum:
+      state: present
+      name:
+       - bind-utils
+
+  - name: checking name resolution for nodes
+    shell: |
+      nslookup vmkub01
+      nslookup vmkub02
+      nslookup vmkub03
+      nslookup vmkub04
+    register: ns
+  - debug: msg="{{ ns.stdout }}"
+
+  - name: Enable SELinux
+    ansible.posix.selinux:
+      policy: targeted
+      state: disabled
+
+  - name: Disable swap permanently, persist reboots
+    replace:
+      path: /etc/fstab
+      regexp: '^(\s*)([^#\n]+\s+)(\w+\s+)swap(\s+.*)$'
+      replace: '#\1\2\3swap\4'
+      backup: yes
+  - name: reboot
+    reboot:
+
+  - name: set net.bridge.bridge-nf-call-iptables = 1
+    lineinfile:
+      path: /etc/sysctl.conf 
+      line: net.bridge.bridge-nf-call-iptables = 1
+
+  - name: Install yum utils
+    yum:
+      name: yum-utils
+      state: latest
+
+  - name: Add Docker repo
+    get_url:
+      url: https://download.docker.com/linux/centos/docker-ce.repo
+      dest: /etc/yum.repos.d/docer-ce.repo
+    become: yes
+
+  - name: Install Docker
+    package:
+      name: docker-ce
+      state: latest
+    become: yes
+
+  - name: Install Docker CLI not?
+    package:
+      name: docker-ce-cli
+      state: latest
+    become: yes
+
+  - name: cont not 
+    package:
+      name: containerd.io
+      state: latest
+    become: yes
+
+  - name: Start Docker service
+    service:
+      name: docker
+      state: started
+      enabled: yes
+    become: yes
+
+  - name: Install Docker Py
+    package:
+      name: python-docker-py
+      state: latest
+    become: yes
+
+  - name: disable SELinux on reboot
+    selinux:
+      state: disabled
+
+  - name: ensure net.bridge.bridge-nf-call-ip6tables is set to 1
+    sysctl:
+     name: net.bridge.bridge-nf-call-ip6tables
+     value: 1
+     state: present
+
+  - name: ensure net.bridge.bridge-nf-call-iptables is set to 1
+    sysctl:
+     name: net.bridge.bridge-nf-call-iptables
+     value: 1
+     state: present
+
+  - name: add Kubernetes' YUM repository
+    yum_repository:
+     name: Kubernetes
+     description: Kubernetes YUM repository
+     baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+     gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+     gpgcheck: yes
+
+  - name: install kubelet
+    yum:
+      name: kubelet-1.21.13
+      state: present
+
+  - name: install kubeadm
+    yum:
+      name: kubeadm-1.21.13
+      state: present
+
+  - name: start kubelet
+    service:
+      name: kubelet
+      enabled: yes
+      state: started
+
+- hosts: k8s_master
+  become: yes
+  gather_facts: false
+  tasks:
+  - name: install kubectl
+    yum:
+      name: kubectl-1.21.13
+      state: present
+      allow_downgrade: yes
+
+  - name: initialize the cluster
+    shell: kubeadm init --pod-network-cidr=192.168.0.0/16 >> cluster_initialized.txt
+    args:
+      chdir: $HOME
+      creates: cluster_initialized.txt
+
+  - name: create .kube directory
+    become: yes
+    become_user: root
+    file:
+      path: $HOME/.kube
+      state: directory
+      mode: 0755
+
+  - name: copy admin.conf to user's kube config
+    copy:
+      src: /etc/kubernetes/admin.conf
+      dest: $HOME/.kube/config
+      remote_src: yes
+      owner: root
+
+  - name: install Pod network
+    become: yes
+    become_user: root
+    shell: |
+      kubectl create -f https://docs.projectcalico.org/manifests/tigera-operator.yaml >> pod_network_setup.txt
+      kubectl create -f https://docs.projectcalico.org/manifests/custom-resources.yaml >> pod_network_setup.txt
+    args:
+      chdir: $HOME
+      creates: pod_network_setup.txt
+
+  - name: set cluster secret
+    become: yes
+    become_user: root
+    shell: |
+      kubectl create secret generic regcred --from-file=.dockerconfigjson=/root/.docker/config.json --type=kubernetes.io/dockerconfigjson
+
+  - name: get join command
+    shell: kubeadm token create --print-join-command
+    register: join_command_raw
+
+  - name: set join command
+    set_fact:
+      join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+  - name: Register dummy host with variable
+    add_host:
+      name: "DUMMY_HOST"
+      join: " {{ join_command_raw.stdout_lines[0] }}"
+
+- hosts: k8s_worker
+  become: yes
+  tasks:
+  - name: join cluster
+    shell: "{{ hostvars['DUMMY_HOST']['join'] }} --ignore-preflight-errors all  >> node_joined.txt"
+    args:
+      chdir: $HOME
+      creates: node_joined.txt
