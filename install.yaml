@@ -64,10 +64,10 @@
 #    register: ns
 #  - debug: msg="{{ ns.stdout }}"
 
-  - name: Enable SELinux
-    ansible.posix.selinux:
-      policy: targeted
-      state: disabled
+#  - name: Enable SELinux
+#    ansible.posix.selinux:
+#      policy: targeted
+#      state: disabled
 
   - name: Disable swap permanently, persist reboots
     replace:
