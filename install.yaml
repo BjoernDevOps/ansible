@@ -55,14 +55,14 @@
       name:
        - bind-utils
 
-  - name: checking name resolution for nodes
-    shell: |
-      nslookup vmkub01
-      nslookup vmkub02
-      nslookup vmkub03
-      nslookup vmkub04
-    register: ns
-  - debug: msg="{{ ns.stdout }}"
+#  - name: checking name resolution for nodes
+#    shell: |
+#      nslookup vmkub01
+#      nslookup vmkub02
+#      nslookup vmkub03
+#      nslookup vmkub04
+#    register: ns
+#  - debug: msg="{{ ns.stdout }}"
 
   - name: Enable SELinux
     ansible.posix.selinux:
